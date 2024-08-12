@@ -245,13 +245,21 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
 def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png"):
     cam_infos = []
 
-    with open(os.path.join(path, transformsfile)) as json_file:
+    with open(os.path.join(path, "ns", transformsfile)) as json_file:
         contents = json.load(json_file)
         fovx = contents["camera_angle_x"]
 
         frames = contents["frames"]
         for idx, frame in enumerate(frames):
-            cam_name = os.path.join(path, frame["file_path"] + extension)
+            cam_name = os.path.join(path, frame["file_path"])
+            
+            image_path = os.path.join(path, cam_name)
+            
+            if not os.path.exists(image_path):
+                continue
+            
+            image_name = Path(cam_name).stem
+            image = Image.open(image_path)            
 
             # NeRF 'transform_matrix' is a camera-to-world transform
             c2w = np.array(frame["transform_matrix"])
@@ -261,11 +269,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             # get the world-to-camera transform and set R, T
             w2c = np.linalg.inv(c2w)
             R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
-            T = w2c[:3, 3]
-
-            image_path = os.path.join(path, cam_name)
-            image_name = Path(cam_name).stem
-            image = Image.open(image_path)
+            T = w2c[:3, 3]          
 
             im_data = np.array(image.convert("RGBA"))
 
@@ -286,9 +290,9 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
 def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
     print("Reading Training Transforms")
-    train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
+    train_cam_infos = readCamerasFromTransforms(path, "transforms.json", white_background, extension)
     print("Reading Test Transforms")
-    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension)
+    test_cam_infos = []
     train_cam_infos = train_cam_infos
     print("train num:", len(train_cam_infos))
     # if not eval:
@@ -302,10 +306,14 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
         # Since this data set has no colmap data, we start with random points
         num_pts = 100_000
         print(f"Generating random point cloud ({num_pts})...")
+
+        sparse_ply = os.path.join(path, "ns", "sparse_pc.ply")
+
+        pcd = o3d.io.read_point_cloud(sparse_ply)
         
         # We create random points inside the bounds of the synthetic Blender scenes
-        xyz = np.random.random((num_pts, 3)) * 2.6 - 1.3
-        shs = np.random.random((num_pts, 3)) / 255.0
+        xyz = np.asarray(pcd.points)
+        shs = np.asarray(pcd.colors)
         pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
 
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
